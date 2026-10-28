@@ -38,27 +38,60 @@ main{padding:18px;max-width:1300px;margin:0 auto}
 .chip{display:inline-block;padding:3px 10px;border-radius:99px;color:#fff;font-size:13px}
 .hint{font-size:12px;color:var(--mute);margin-top:12px}
 /* map */
-#map{position:relative;height:680px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#mapscroll{overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+#map{position:relative;flex:none}
+.tools{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:10px;font-size:13px}
+.tools label{display:flex;align-items:center;gap:8px}
+.tools input{width:120px}
+.tools output{min-width:34px;color:var(--mute)}
 .gl{position:absolute;background:var(--line)}
 .gl.zero{background:var(--ink);opacity:.5}
 .lb{position:absolute;font-size:12px;color:var(--mute);white-space:nowrap}
-.th{position:absolute;width:56px;height:56px;object-fit:cover;border-radius:50%;border:3px solid;cursor:pointer;background:#ddd}
-.th:hover{z-index:5;transform:scale(1.9)}
+.th{position:absolute;object-fit:contain;border-radius:3px;border:3px solid;cursor:pointer;background:#ddd}
+.th:hover{z-index:5;transform:scale(1.8)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin:10px 2px;font-size:13px}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px}
+
+/* table options */
+.table-options{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:10px;font-size:13px}
+.table-options label{display:flex;align-items:center;gap:7px}
+.table-options select,.table-options input{font:inherit;padding:5px;border:1px solid var(--line);border-radius:6px;background:white;color:var(--ink)}
+.table-options .sp{flex:1}
+.table-options button{white-space:nowrap}
+.table-cell-more{display:block;margin-top:8px;font-size:12px}
+.table-cell-more button{padding:3px 8px;font-size:12px}
+.table-collapsed .hair-item:nth-child(n+5){display:none}
+.table-empty-note{font-size:12px;color:var(--mute);margin:8px 2px}
+.table-export-note{font-size:12px;color:var(--mute)}
+/* table */
+.table-wrap{overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.hair-table{border-collapse:separate;border-spacing:0;width:100%;min-width:900px}
+.hair-table th,.hair-table td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px;vertical-align:top}
+.hair-table thead th{position:sticky;top:0;background:#f7f8fa;z-index:2;text-align:center;font-size:13px}
+.hair-table th:first-child{position:sticky;left:0;z-index:3;text-align:left;min-width:190px;width:190px}
+.hair-table tbody th{position:sticky;left:0;background:#f7f8fa;z-index:1;font-size:13px}
+.hair-table td{min-width:135px;width:20%}
+.hair-cell{display:flex;flex-wrap:wrap;align-content:flex-start;gap:8px}
+.hair-item{display:flex;flex-direction:column;align-items:center;gap:3px;width:76px;max-width:100%;font-size:11px;color:var(--mute);text-align:center}
+.hair-item img{display:block;width:76px;height:76px;object-fit:contain;border-radius:6px;background:#f0f1f3;cursor:pointer}
+.hair-item img:hover{outline:2px solid var(--ink)}
+.hair-empty{color:#a0a6af;font-size:12px}
+.table-intro{color:var(--mute);font-size:13px;margin:0 0 10px}
+.table-count{font-weight:500;color:var(--mute);display:block;margin-top:3px;font-size:11px}
+
 /* families */
 .fam{background:var(--panel);border:1px solid var(--line);border-left-width:6px;border-radius:12px;padding:14px;margin-bottom:16px}
 .fam h2{font-size:16px;margin:0 0 2px}
 .fam p{margin:0 0 10px;color:var(--mute);font-size:13px}
 .grid{display:flex;flex-wrap:wrap;gap:8px}
-.grid img{width:110px;height:110px;object-fit:cover;border-radius:8px;cursor:pointer}
+.grid img{width:110px;height:110px;object-fit:contain;border-radius:8px;cursor:pointer}
 </style>
 </head>
 <body>
 <header>
   <h1>Hair length map</h1>
   <div class="tabs">
-    <button data-v="rate">Rate</button><button data-v="map">Map</button><button data-v="fam">Families</button>
+    <button data-v="rate">Rate</button><button data-v="table">Table</button><button data-v="map">Graph</button><button data-v="fam">Families</button>
   </div>
   <button id="addImg">Add images</button>
   <button id="addDir">Add folder</button>
@@ -130,6 +163,7 @@ function render() {
     return;
   }
   if (view === 'rate') rateView(app);
+  else if (view === 'table') tableView(app);
   else if (view === 'map') mapView(app);
   else famView(app);
 }
@@ -154,41 +188,333 @@ function legend() {
   return '<div class="legend">' + Object.values(FAM).map((f) => '<span><i style="background:' + f.c + '"></i>' + f.n + '</span>').join('') + '</div>';
 }
 
-function mapView(app) {
-  const rated = items.filter(done);
-  app.innerHTML = legend() + '<div id="map"></div>' + (rated.length < items.length ? '<p class="hint">' + (items.length - rated.length) + ' unrated images are not shown yet.</p>' : '');
-  const el = $('#map'), W = el.clientWidth, H = el.clientHeight, S = 56;
-  const L = 60, R = W - 40, T = 30, B = H - 50, YMIN = -2, YMAX = 4;
+let MS = {size: 56, gap: 4, w: 100, h: 680};
+try { Object.assign(MS, JSON.parse(localStorage.getItem('hairmap:settings') || '{}')); } catch (e) {}
+let LAST = null;
+
+function computeLayout(W, H, S, gap) {
+  const L = 60, R = W - 40, T = 30, B = H - 50, YMIN = -4, YMAX = 4, step = S + gap;
   const px = (a) => L + (a - 1) / 4 * (R - L);
   const py = (c) => B - (c - YMIN) / (YMAX - YMIN) * (B - T);
+  const longest = (r) => Math.max(...r);
+  const topMinusSides = (r) => r[0] - r[1];
+  const placed = [], pts = []; let fail = 0;
+  items.filter(done).sort((a, b) => longest(a.r) - longest(b.r) || topMinusSides(a.r) - topMinusSides(b.r)).forEach((it) => {
+    const bx = px(longest(it.r)), by = py(topMinusSides(it.r));
+    let pos = null;
+    for (let k = 0; k < 2500 && !pos; k++) {
+      const a = k * 2.4, rad = Math.sqrt(k) * step * 0.6;
+      const x = bx + Math.cos(a) * rad, y = by + Math.sin(a) * rad;
+      if (x < S / 2 || x > W - S / 2 || y < S / 2 || y > H - S / 2 - 30) continue;
+      if (placed.every((p) => Math.abs(p[0] - x) >= step || Math.abs(p[1] - y) >= step)) pos = [x, y];
+    }
+    if (!pos) { fail++; pos = [Math.max(S / 2, Math.min(W - S / 2, bx)), Math.max(S / 2, Math.min(H - S / 2 - 30, by))]; }
+    placed.push(pos); pts.push({it, x: pos[0], y: pos[1]});
+  });
+  return {W, H, L, R, T, B, YMIN, YMAX, px, py, pts, fail, S};
+}
+
+function drawMap() {
+  const el = $('#map'), wrap = $('#mapscroll');
+  const W = Math.round(wrap.clientWidth * MS.w / 100), H = MS.h;
+  const g = computeLayout(W, H, MS.size, MS.gap); LAST = g;
+  el.style.width = W + 'px'; el.style.height = H + 'px';
   let h = '';
   [1, 2, 3, 4, 5].forEach((v) => {
-    h += '<div class="gl" style="left:' + px(v) + 'px;top:' + T + 'px;width:1px;height:' + (B - T) + 'px"></div><div class="lb" style="left:' + (px(v) - 30) + 'px;top:' + (B + 8) + 'px;width:60px;text-align:center">' + LEVELS[v - 1] + '</div>';
+    h += '<div class="gl" style="left:' + g.px(v) + 'px;top:' + g.T + 'px;width:1px;height:' + (g.B - g.T) + 'px"></div><div class="lb" style="left:' + (g.px(v) - 30) + 'px;top:' + (g.B + 8) + 'px;width:60px;text-align:center">' + LEVELS[v - 1] + '</div>';
   });
-  for (let c = YMIN; c <= YMAX; c++) {
-    h += '<div class="gl' + (c === 0 ? ' zero' : '') + '" style="top:' + py(c) + 'px;left:' + L + 'px;height:1px;width:' + (R - L) + 'px"></div>';
+  for (let c = g.YMIN; c <= g.YMAX; c++) {
+    h += '<div class="gl' + (c === 0 ? ' zero' : '') + '" style="top:' + g.py(c) + 'px;left:' + g.L + 'px;height:1px;width:' + (g.R - g.L) + 'px"></div>';
   }
-  h += '<div class="lb" style="left:8px;top:' + (py(0) - 9) + 'px">same length</div>';
-  h += '<div class="lb" style="left:8px;top:' + (py(3) - 9) + 'px;width:50px;white-space:normal">top much longer</div>';
-  h += '<div class="lb" style="left:' + (W / 2 - 90) + 'px;top:' + (H - 22) + 'px">Overall length (average of top, sides, back)</div>';
+  h += '<div class="lb" style="left:8px;top:' + (g.py(0) - 9) + 'px">top = sides</div>';
+  h += '<div class="lb" style="left:8px;top:' + (g.py(3) - 9) + 'px;width:50px;white-space:normal">top longer</div>';
+  h += '<div class="lb" style="left:8px;top:' + (g.py(-3) - 9) + 'px;width:50px;white-space:normal">sides longer</div>';
+  h += '<div class="lb" style="left:' + (W / 2 - 130) + 'px;top:' + (H - 22) + 'px">Longest hair length (top, sides, or back)</div>';
   el.innerHTML = h;
-  const placed = [];
-  const order = rated.slice().sort((a, b) => avg(a.r) - avg(b.r));
-  order.forEach((it) => {
-    const bx = px(avg(it.r)), by = py(Math.max(YMIN, Math.min(YMAX, it.r[0] - it.r[1])));
-    let pos = [bx, by];
-    for (let k = 0; k < 300; k++) {
-      const a = k * 2.4, rad = k * 3, x = bx + Math.cos(a) * rad, y = by + Math.sin(a) * rad;
-      if (x < S / 2 || x > W - S / 2 || y < S / 2 || y > H - S / 2 - 30) continue;
-      if (placed.every((p) => Math.hypot(p[0] - x, p[1] - y) >= S - 2)) { pos = [x, y]; break; }
-    }
-    placed.push(pos);
+  g.pts.forEach(({it, x, y}) => {
     const im = document.createElement('img');
     im.className = 'th'; im.src = it.url; im.title = code(it.r);
-    im.style.cssText = 'left:' + (pos[0] - S / 2) + 'px;top:' + (pos[1] - S / 2) + 'px;border-color:' + FAM[family(it.r)].c;
+    im.style.cssText = 'width:' + g.S + 'px;height:' + g.S + 'px;left:' + (x - g.S / 2) + 'px;top:' + (y - g.S / 2) + 'px;border-color:' + FAM[family(it.r)].c;
     im.onclick = () => { cur = items.indexOf(it); reg = 0; view = 'rate'; render(); };
     el.appendChild(im);
   });
+  $('#mapnote').textContent = g.fail ? g.fail + ' images could not be separated. Reduce image size or gap, or make the map wider or taller.' : '';
+}
+
+
+function tableRow(r) {
+  const max = Math.max(...r);
+  const top = r[0] === max, sides = r[1] === max, back = r[2] === max;
+  if (top && sides && back) return 'uniform';
+  if (top && back && !sides) return 'topback';
+  if (top && !sides && !back) return 'top';
+  if (back && !top && !sides) return 'back';
+  return 'other';
+}
+
+let tableSortDirection = 'asc';
+let tableCollapsed = true;
+const TABLE_MAX_VISIBLE_ROWS = 4;
+
+function tableRow(r) {
+  const max = Math.max(...r);
+  const top = r[0] === max, sides = r[1] === max, back = r[2] === max;
+  if (top && sides && back) return 'uniform';
+  if (top && back && !sides) return 'topback';
+  if (top && !sides && !back) return 'top';
+  if (back && !top && !sides) return 'back';
+  return 'other';
+}
+
+function tableView(app) {
+  const rows = [
+    {id: 'topback', label: 'Top & back longest', detail: 'Top and back share the highest rating; sides are shorter.'},
+    {id: 'uniform', label: 'All the same', detail: 'Top, sides and back share the highest rating.'},
+    {id: 'top', label: 'Top longest', detail: 'Top has the highest rating on its own.'},
+    {id: 'back', label: 'Back longest', detail: 'Back has the highest rating on its own.'},
+    {id: 'other', label: 'Other / mixed', detail: 'Includes styles where sides are longest or the maximum is shared by another combination.'}
+  ];
+  const rated = items.filter(done);
+  const unrated = items.length - rated.length;
+  const byRow = {};
+  rows.forEach(row => byRow[row.id] = []);
+  rated.forEach(it => byRow[tableRow(it.r)].push(it));
+
+  // Sort each category by average, then by rating code and filename for stable ties.
+  Object.values(byRow).forEach(list => list.sort((a, b) => {
+    const delta = avg(a.r) - avg(b.r);
+    const primary = tableSortDirection === 'asc' ? delta : -delta;
+    return primary || code(a.r).localeCompare(code(b.r), undefined, {numeric: true}) ||
+      a.file.name.localeCompare(b.file.name, undefined, {numeric: true});
+  }));
+
+  const headings = LEVELS.map((label, idx) =>
+    '<th scope="col">' + (idx + 1) + ' · ' + label + '</th>'
+  ).join('');
+  const body = rows.map(row => {
+    const cells = LEVELS.map((_, idx) => {
+      const list = byRow[row.id].filter(it => Math.max(...it.r) === idx + 1);
+      if (!list.length) return '<td><span class="hair-empty">—</span></td>';
+      const cellId = 'cell_' + row.id + '_' + (idx + 1);
+      const images = list.map(it => {
+        const index = items.indexOf(it);
+        return '<div class="hair-item"><img src="' + it.url + '" alt="" data-i="' + index +
+          '" title="' + it.file.name.replace(/&/g, '&amp;').replace(/"/g, '&quot;') +
+          ' · Top/Sides/Back: ' + code(it.r) + ' · Average: ' + avg(it.r).toFixed(2) +
+          '"><span>Avg ' + avg(it.r).toFixed(2) + '</span></div>';
+      }).join('');
+      const extra = list.length > TABLE_MAX_VISIBLE_ROWS
+        ? '<div class="table-cell-more"><button type="button" data-expand="' + cellId + '">' +
+          (tableCollapsed ? 'Show all (' + list.length + ')' : 'Show first 4') + '</button></div>'
+        : '';
+      return '<td><div class="hair-cell ' + (tableCollapsed && list.length > TABLE_MAX_VISIBLE_ROWS ? 'table-collapsed' : '') +
+        '" id="' + cellId + '">' + images + '</div>' + extra + '</td>';
+    }).join('');
+    return '<tr><th scope="row">' + row.label + '<span class="table-count">' +
+      byRow[row.id].length + ' image' + (byRow[row.id].length === 1 ? '' : 's') +
+      '</span><span class="table-count" style="font-weight:400">' + row.detail +
+      '</span></th>' + cells + '</tr>';
+  }).join('');
+
+  app.innerHTML = '<p class="table-intro">Columns show the longest rated section (maximum of top, sides and back). Rows show which section or sections reach that maximum. Images in each cell are sorted by average rating. Click a thumbnail to edit its ratings.</p>' +
+    '<div class="table-options">' +
+    '<label>Average sort <select id="tableSort"><option value="asc"' + (tableSortDirection === 'asc' ? ' selected' : '') + '>Ascending (lowest first)</option><option value="desc"' + (tableSortDirection === 'desc' ? ' selected' : '') + '>Descending (highest first)</option></select></label>' +
+    '<label><input type="checkbox" id="tableCollapse"' + (tableCollapsed ? ' checked' : '') + '> Collapse large cells to 4 images</label>' +
+    '<span class="sp"></span><button id="exportTableCsv">Export table (CSV)</button><button id="exportTableHtml">Export table (HTML)</button></div>' +
+    '<div class="table-wrap"><table class="hair-table"><thead><tr><th scope="col">Style group</th>' +
+    headings + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
+    '<p class="table-export-note">CSV exports the complete table data (not just the visible thumbnails). HTML exports a standalone table report with the thumbnails embedded, suitable for keeping or sharing.</p>' +
+    (unrated ? '<p class="hint">' + unrated + ' unrated image' + (unrated === 1 ? '' : 's') + ' not shown yet. Rate all three sections to place an image in the table.</p>' : '') +
+    (!rated.length ? '<p class="hint">Rate at least one image to populate the table.</p>' : '');
+
+  app.querySelectorAll('.hair-item img').forEach(im => im.onclick = () => {
+    cur = +im.dataset.i; reg = 0; view = 'rate'; render();
+  });
+  $('#tableSort').onchange = (e) => { tableSortDirection = e.target.value; tableView($('#app')); };
+  $('#tableCollapse').onchange = (e) => { tableCollapsed = e.target.checked; tableView($('#app')); };
+  app.querySelectorAll('[data-expand]').forEach(btn => btn.onclick = () => {
+    const cell = document.getElementById(btn.dataset.expand);
+    if (!cell) return;
+    const collapsed = cell.classList.toggle('table-collapsed');
+    btn.textContent = collapsed ? 'Show all (' + cell.querySelectorAll('.hair-item').length + ')' : 'Show first 4';
+  });
+  $('#exportTableCsv').onclick = exportTableCSV;
+  $('#exportTableHtml').onclick = exportTableHTML;
+}
+
+function tableData() {
+  const rows = [
+    {id: 'topback', label: 'Top & back longest'},
+    {id: 'uniform', label: 'All the same'},
+    {id: 'top', label: 'Top longest'},
+    {id: 'back', label: 'Back longest'},
+    {id: 'other', label: 'Other / mixed'}
+  ];
+  const data = [];
+  items.filter(done).forEach(it => {
+    const max = Math.max(...it.r);
+    data.push({
+      file: it.file.name,
+      row: rows.find(r => r.id === tableRow(it.r)).label,
+      longestRating: max,
+      longestLabel: LEVELS[max - 1],
+      top: it.r[0], sides: it.r[1], back: it.r[2],
+      average: avg(it.r),
+      averageDisplay: avg(it.r).toFixed(2),
+      url: it.url,
+      item: it
+    });
+  });
+  data.sort((a, b) => {
+    const d = a.average - b.average;
+    return (tableSortDirection === 'asc' ? d : -d) ||
+      a.file.localeCompare(b.file, undefined, {numeric: true});
+  });
+  return {rows, data};
+}
+
+function csvEscape(value) {
+  const s = String(value ?? '');
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+
+function exportTableCSV() {
+  const {data} = tableData();
+  const headers = ['Filename', 'Style group', 'Longest rating', 'Longest rating label', 'Top rating', 'Sides rating', 'Back rating', 'Average rating'];
+  const lines = [headers.map(csvEscape).join(',')];
+  data.forEach(d => lines.push([
+    d.file, d.row, d.longestRating, d.longestLabel, d.top, d.sides, d.back, d.averageDisplay
+  ].map(csvEscape).join(',')));
+  download('hair-length-table.csv', '\ufeff' + lines.join('\r\n'));
+}
+
+async function exportTableHTML() {
+  const {rows, data} = tableData();
+  const byCell = {};
+  rows.forEach(r => byCell[r.id] = {});
+  data.forEach(d => {
+    const rowId = tableRow(d.item.r);
+    (byCell[rowId][d.longestRating] ||= []).push(d);
+  });
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const th = LEVELS.map((l, i) => '<th>' + (i + 1) + ' · ' + esc(l) + '</th>').join('');
+  const body = rows.map(r => '<tr><th>' + esc(r.label) + '</th>' + LEVELS.map((_, i) => {
+    const list = byCell[r.id][i + 1] || [];
+    return '<td>' + (list.length ? list.map(d =>
+      '<figure><img src="' + d.url + '" alt="' + esc(d.file) + '"><figcaption>' +
+      esc(d.file) + '<br>Avg ' + d.averageDisplay + ' · ' + d.top + '/' + d.sides + '/' + d.back +
+      '</figcaption></figure>').join('') : '—') + '</td>';
+  }).join('') + '</tr>').join('');
+  const images = await Promise.all(data.map(async d => {
+    try {
+      const image = await loadImg(d.url);
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth || image.width;
+      canvas.height = image.naturalHeight || image.height;
+      canvas.getContext('2d').drawImage(image, 0, 0);
+      return [d.file, canvas.toDataURL('image/jpeg', 0.88)];
+    } catch (e) { return [d.file, '']; }
+  }));
+  const embedded = new Map(images);
+  let standaloneBody = body;
+  for (const d of data) {
+    const original = 'src="' + d.url + '"';
+    const replacement = 'src="' + (embedded.get(d.file) || '') + '"';
+    standaloneBody = standaloneBody.split(original).join(replacement);
+  }
+  const documentText = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hair length table export</title><style>' +
+    'body{font:14px/1.4 system-ui,sans-serif;margin:20px;color:#1d2430}h1{font-size:22px}p{color:#68707d}.wrap{overflow:auto}table{border-collapse:collapse;min-width:900px;width:100%}th,td{border:1px solid #d5d9df;padding:8px;vertical-align:top}thead th{background:#f7f8fa}figure{display:inline-flex;flex-direction:column;align-items:center;width:100px;margin:4px}figure img{width:90px;height:90px;object-fit:contain;background:#f0f1f3}figcaption{font-size:10px;text-align:center;overflow-wrap:anywhere}' +
+    '</style></head><body><h1>Hair length table</h1><p>Sorted ' + (tableSortDirection === 'asc' ? 'ascending (lowest average first)' : 'descending (highest average first)') + ' by average rating within each cell. Average = mean of top, sides and back ratings.</p><div class="wrap"><table><thead><tr><th>Style group</th>' +
+    th + '</tr></thead><tbody>' + standaloneBody + '</tbody></table></div></body></html>';
+  download('hair-length-table.html', documentText);
+}
+
+function mapView(app) {
+  const sl = (id, label, min, max, step) => '<label>' + label + '<input type="range" id="s_' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + MS[id] + '"><output>' + MS[id] + '</output></label>';
+  const unrated = items.length - items.filter(done).length;
+  app.innerHTML = legend() +
+    '<div class="tools">' + sl('size', 'Image size', 24, 120, 2) + sl('gap', 'Gap', 0, 30, 1) + sl('w', 'Map width %', 100, 300, 10) + sl('h', 'Map height', 400, 1400, 20) +
+    '<button id="rst">Reset</button><span class="sp"></span><button id="expMap">Export map (PNG)</button></div>' +
+    '<div id="mapscroll"><div id="map"></div></div><p class="hint" id="mapnote"></p>' +
+    (unrated ? '<p class="hint">' + unrated + ' unrated images are not shown yet.</p>' : '');
+  ['size', 'gap', 'w', 'h'].forEach((id) => {
+    const inp = $('#s_' + id);
+    inp.oninput = () => {
+      MS[id] = +inp.value; inp.nextElementSibling.textContent = inp.value;
+      try { localStorage.setItem('hairmap:settings', JSON.stringify(MS)); } catch (e) {}
+      drawMap();
+    };
+  });
+  $('#rst').onclick = () => { MS = {size: 56, gap: 4, w: 100, h: 680}; try { localStorage.removeItem('hairmap:settings'); } catch (e) {} render(); };
+  $('#expMap').onclick = exportMap;
+  drawMap();
+}
+
+const loadImg = (url) => new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.src = url; });
+
+async function exportMap() {
+  if (!LAST || !LAST.pts.length) return alert('Rate some images first.');
+  const g = LAST, sc = 2, LG = 44, cs = getComputedStyle(document.documentElement);
+  const col = (k) => cs.getPropertyValue('--' + k).trim();
+  const cv = document.createElement('canvas');
+  cv.width = g.W * sc; cv.height = (g.H + LG) * sc;
+  const c = cv.getContext('2d');
+  c.scale(sc, sc);
+  c.fillStyle = '#fff'; c.fillRect(0, 0, g.W, g.H + LG);
+  c.font = '13px system-ui, sans-serif'; c.textBaseline = 'middle'; c.textAlign = 'left';
+  let lx = 16;
+  Object.keys(FAM).forEach((k) => {
+    c.fillStyle = col(k); c.fillRect(lx, LG / 2 - 6, 12, 12);
+    c.fillStyle = '#1d2430'; c.fillText(FAM[k].n, lx + 18, LG / 2);
+    lx += 18 + c.measureText(FAM[k].n).width + 24;
+  });
+  c.translate(0, LG);
+  c.lineWidth = 1; c.font = '12px system-ui, sans-serif'; c.textBaseline = 'top';
+  [1, 2, 3, 4, 5].forEach((v) => {
+    const x = g.px(v);
+    c.strokeStyle = '#d5d9df'; c.beginPath(); c.moveTo(x, g.T); c.lineTo(x, g.B); c.stroke();
+    c.fillStyle = '#68707d'; c.textAlign = 'center'; c.fillText(LEVELS[v - 1], x, g.B + 8);
+  });
+  for (let v = g.YMIN; v <= g.YMAX; v++) {
+    const y = g.py(v);
+    c.strokeStyle = v === 0 ? 'rgba(29,36,48,.5)' : '#d5d9df';
+    c.beginPath(); c.moveTo(g.L, y); c.lineTo(g.R, y); c.stroke();
+  }
+  c.fillStyle = '#68707d'; c.textAlign = 'left';
+  c.fillText('top = sides', 8, g.py(0) - 9);
+  c.fillText('top longer', 8, g.py(3) - 9);
+  c.fillText('sides longer', 8, g.py(-3) - 9);
+  c.textAlign = 'center'; c.fillText('Longest hair length (top, sides, or back)', g.W / 2, g.H - 22);
+  const imgs = await Promise.all(g.pts.map((p) => loadImg(p.it.url)));
+  g.pts.forEach((p, i) => {
+    const S = g.S;
+    const x = p.x - S / 2;
+    const y = p.y - S / 2;
+    const im = imgs[i];
+
+    // Draw the coloured square background
+    c.fillStyle = col(family(p.it.r));
+    c.fillRect(x, y, S, S);
+
+    // Fit the entire image inside the square without cropping
+    const pad = 3;
+    const box = S - pad * 2;
+    const scale = Math.min(
+      box / im.naturalWidth,
+      box / im.naturalHeight
+    );
+
+    const dw = im.naturalWidth * scale;
+    const dh = im.naturalHeight * scale;
+    const dx = x + (S - dw) / 2;
+    const dy = y + (S - dh) / 2;
+
+    c.drawImage(im, dx, dy, dw, dh);
+  });
+  cv.toBlob((b) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b); a.download = 'hair-length-map.png'; a.click();
+  }, 'image/png');
 }
 
 function famView(app) {
