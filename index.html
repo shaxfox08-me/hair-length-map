@@ -80,6 +80,11 @@ main{padding:18px;max-width:1300px;margin:0 auto}
 .table-intro{color:var(--mute);font-size:13px;margin:0 0 10px}
 .table-count{font-weight:500;color:var(--mute);display:block;margin-top:3px;font-size:11px}
 
+/* 3d */
+#cube{display:block;width:100%;background:#fff;border:1px solid var(--line);border-radius:12px;touch-action:none;cursor:grab}
+#cube.drag{cursor:grabbing}
+.tools input[type=checkbox]{width:auto}
+.tools select{font:inherit;padding:4px;border:1px solid var(--line);border-radius:6px;background:#fff}
 /* families */
 .fam{background:var(--panel);border:1px solid var(--line);border-left-width:6px;border-radius:12px;padding:14px;margin-bottom:16px}
 .fam h2{font-size:16px;margin:0 0 2px}
@@ -92,7 +97,7 @@ main{padding:18px;max-width:1300px;margin:0 auto}
 <header>
   <h1>Hair length map</h1>
   <div class="tabs">
-    <button data-v="rate">Rate</button><button data-v="table">Table</button><button data-v="map">Graph</button><button data-v="fam">Families</button>
+    <button data-v="rate">Rate</button><button data-v="table">Table</button><button data-v="cube">3D</button><button data-v="map">Graph</button><button data-v="fam">Families</button>
   </div>
   <button id="addImg">Add images</button>
   <button id="addDir">Add folder</button>
@@ -165,6 +170,7 @@ function render() {
   }
   if (view === 'rate') rateView(app);
   else if (view === 'table') tableView(app);
+  else if (view === 'cube') cubeView(app);
   else if (view === 'map') mapView(app);
   else famView(app);
 }
@@ -744,6 +750,314 @@ addEventListener('keydown', (e) => {
   else if (k === 'b') { reg = 2; render(); }
   else if (/^[1-5]$/.test(k)) setVal(+k);
 });
+
+/* ---------- 3D cube view: every Top / Sides / Back permutation, origin = 1-1-1 ---------- */
+const CS_DEFAULT = {yaw: 0.6, pitch: 0.4, zoom: 100, size: 52, spread: 100, persp: 35, lattice: true, codes: true, auto: false, h: 720, mode: 'orbit', cam: [0, 0, 6], wyaw: 0, wpitch: 0};
+let CS = Object.assign({}, CS_DEFAULT, {cam: [0, 0, 6]});
+try { Object.assign(CS, JSON.parse(localStorage.getItem('hairmap:cube') || '{}')); } catch (e) {}
+let cubeDirty = true, cubeHits = [], cubeHover = null, cubeEl = null, cubeRAF = 0, cubeSize = '';
+const CUBE_OFFS = (() => {
+  const o = [];
+  for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) for (const c of [-1, 0, 1]) o.push([a, b, c]);
+  return o.sort((p, q) => (p[0] ** 2 + p[1] ** 2 + p[2] ** 2) - (q[0] ** 2 + q[1] ** 2 + q[2] ** 2));
+})();
+const cubeSave = () => { try { localStorage.setItem('hairmap:cube', JSON.stringify(CS)); } catch (e) {} };
+
+function cubeImg(it) {
+  if (!it._img) {
+    const im = new Image();
+    it._p = new Promise((res) => { im.onload = () => { it._ok = true; cubeDirty = true; res(); }; im.onerror = res; });
+    im.src = it.url; it._img = im;
+  }
+  return it._img;
+}
+
+function cubeProject(p, W, H) {
+  if (CS.mode === 'walk') {
+    const cy = Math.cos(CS.wyaw), sy = Math.sin(CS.wyaw), cp = Math.cos(CS.wpitch), sp = Math.sin(CS.wpitch);
+    const dx = p[0] - CS.cam[0], dy = p[1] - CS.cam[1], dz = p[2] - CS.cam[2];
+    const depth = dx * sy * cp + dy * sp - dz * cy * cp;
+    const rx = dx * cy + dz * sy, ry = -dx * sy * sp + dy * cp + dz * cy * sp;
+    const sc = 0.65 * H * CS.zoom / 100 / Math.max(depth, 0.001);
+    return {x: W / 2 + rx * sc, y: H / 2 - ry * sc, z: -depth, k: 1, sc, vis: depth > 0.15};
+  }
+  const cy = Math.cos(CS.yaw), sy = Math.sin(CS.yaw), cp = Math.cos(CS.pitch), sp = Math.sin(CS.pitch);
+  const x1 = p[0] * cy + p[2] * sy, z1 = -p[0] * sy + p[2] * cy;
+  const y2 = p[1] * cp - z1 * sp, z2 = p[1] * sp + z1 * cp;
+  const D = 40 - CS.persp * 0.34, k = D / Math.max(0.5, D - z2);
+  const u = Math.min(W, H) / 8.8 * CS.zoom / 100;
+  return {x: W / 2 + x1 * u * k, y: H * 0.54 - y2 * u * k, z: z2, k, sc: u * k, vis: true};
+}
+
+function drawCube(ctx, W, H, interactive) {
+  const css = getComputedStyle(document.documentElement);
+  const col = (k) => css.getPropertyValue('--' + k).trim();
+  const f = Math.min(W, H) / 680;
+  const P = (x, y, z) => cubeProject([x, y, z], W, H);
+  const seg = (A, B) => {
+    let a = P(...A), b = P(...B);
+    if (!a.vis && !b.vis) return;
+    if (!a.vis || !b.vis) {
+      const da = -a.z, db = -b.z, N = 0.15;
+      if (!a.vis) { const t = (N - da) / (db - da); a = P(A[0] + t * (B[0] - A[0]), A[1] + t * (B[1] - A[1]), A[2] + t * (B[2] - A[2])); }
+      else { const t = (N - db) / (da - db); b = P(B[0] + t * (A[0] - B[0]), B[1] + t * (A[1] - B[1]), B[2] + t * (A[2] - B[2])); }
+    }
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  };
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.lineJoin = 'round'; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+  // bounding box
+  const lo = -2.5, hi = 2.5, C = [];
+  for (const a of [lo, hi]) for (const b of [lo, hi]) for (const c of [lo, hi]) C.push([a, b, c]);
+  ctx.strokeStyle = '#e1e4e9'; ctx.lineWidth = 1;
+  for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) {
+    const d = (C[i][0] !== C[j][0]) + (C[i][1] !== C[j][1]) + (C[i][2] !== C[j][2]);
+    if (d !== 1) continue;
+    seg(C[i], C[j]);
+  }
+  // axes from the 1-1-1 origin
+  const AX = [[1, 0, 0, 'Top', '#d1495b'], [0, 1, 0, 'Sides', '#3a7ca5'], [0, 0, 1, 'Back', '#4f8a4b']];
+  ctx.font = '600 ' + 12 * f + 'px system-ui, sans-serif';
+  AX.forEach(([dx, dy, dz, name, c]) => {
+    ctx.strokeStyle = c; ctx.lineWidth = 2.5 * f;
+    seg([-2, -2, -2], [-2 + 5 * dx, -2 + 5 * dy, -2 + 5 * dz]);
+    for (let v = 1; v <= 5; v++) {
+      const t = P(-2 + (v - 1) * dx, -2 + (v - 1) * dy, -2 + (v - 1) * dz);
+      if (t.vis) { ctx.fillStyle = c; ctx.fillText(v, t.x + 10 * f, t.y + 14 * f); }
+    }
+    const lab = P(-2 + 5.5 * dx, -2 + 5.5 * dy, -2 + 5.5 * dz);
+    ctx.font = '700 ' + 14 * f + 'px system-ui, sans-serif'; ctx.fillStyle = c;
+    if (lab.vis) ctx.fillText(name.toUpperCase(), lab.x, lab.y);
+    ctx.font = '600 ' + 12 * f + 'px system-ui, sans-serif';
+  });
+
+  // depth-sorted drawables: lattice points and image sprites
+  const list = [];
+  if (CS.lattice) for (let t = 1; t <= 5; t++) for (let s = 1; s <= 5; s++) for (let b = 1; b <= 5; b++) {
+    const pr = P(t - 3, s - 3, b - 3);
+    if (pr.vis) list.push({z: pr.z, dot: pr});
+  }
+  const groups = {};
+  items.filter(done).forEach((it) => (groups[code(it.r)] = groups[code(it.r)] || []).push(it));
+  Object.values(groups).forEach((arr) => {
+    arr.sort((a, b) => a.file.name.localeCompare(b.file.name, undefined, {numeric: true}));
+    arr.forEach((it, k) => {
+      const o = CUBE_OFFS[k % CUBE_OFFS.length];
+      const sc = CS.spread / 100 * 0.33 * (1 + Math.floor(k / CUBE_OFFS.length) * 0.5);
+      const pr = P(it.r[0] - 3 + o[0] * sc, it.r[1] - 3 + o[1] * sc, it.r[2] - 3 + o[2] * sc);
+      if (pr.vis) list.push({z: pr.z, it, pr});
+    });
+  });
+  list.sort((a, b) => a.z - b.z);
+  if (interactive) cubeHits = [];
+
+  const sprite = (it, pr, mult) => {
+    const im = cubeImg(it), box = Math.min(CS.size / 77.3 * pr.sc * mult, H * 0.9);
+    let w = box, h = box;
+    if (it._ok) { const r = im.naturalWidth / im.naturalHeight; if (r > 1) h = box / r; else w = box * r; }
+    const x = pr.x - w / 2, y = pr.y - h / 2, b = Math.max(1.5, 2.5 * f * mult);
+    ctx.fillStyle = col(family(it.r)); ctx.fillRect(x - b, y - b, w + 2 * b, h + 2 * b);
+    if (it._ok) ctx.drawImage(im, x, y, w, h); else { ctx.fillStyle = '#ddd'; ctx.fillRect(x, y, w, h); }
+    return {x: x - b, y: y - b, w: w + 2 * b, h: h + 2 * b};
+  };
+
+  list.forEach((d) => {
+    if (d.dot) {
+      ctx.fillStyle = '#b8bec8'; ctx.beginPath(); ctx.arc(d.dot.x, d.dot.y, Math.max(1, Math.min(7, d.dot.sc * 0.026)), 0, 6.2832); ctx.fill();
+    } else {
+      const r = sprite(d.it, d.pr, 1);
+      if (interactive) cubeHits.push({it: d.it, pr: d.pr, ...r});
+    }
+  });
+
+  if (CS.codes) {
+    ctx.font = '600 ' + 10 * f + 'px system-ui, sans-serif';
+    Object.entries(groups).forEach(([cd, arr]) => {
+      const r = arr[0].r, pr = P(r[0] - 3, r[1] - 3, r[2] - 3);
+      if (!pr.vis) return;
+      const y = pr.y + pr.sc * 0.62;
+      ctx.lineWidth = 3 * f; ctx.strokeStyle = '#fff'; ctx.strokeText(cd, pr.x, y);
+      ctx.fillStyle = '#1d2430'; ctx.fillText(cd, pr.x, y);
+    });
+  }
+
+  {
+    const og = P(-2, -2, -2);
+    if (og.vis) {
+    ctx.font = '700 ' + 12 * f + 'px system-ui, sans-serif'; ctx.textAlign = 'right';
+    ctx.lineWidth = 4 * f; ctx.strokeStyle = '#fff'; ctx.strokeText('origin 1-1-1', og.x - 30 * f, og.y + 26 * f);
+    ctx.fillStyle = '#1d2430'; ctx.fillText('origin 1-1-1', og.x - 30 * f, og.y + 26 * f); ctx.textAlign = 'center';
+    }
+  }
+
+  if (interactive && cubeHover) {
+    const h = cubeHits.find((x) => x.it === cubeHover);
+    if (h) {
+      sprite(cubeHover, h.pr, 1.8);
+      const txt = code(cubeHover.r) + '   ' + cubeHover.file.name;
+      ctx.font = '600 ' + 12 * f + 'px system-ui, sans-serif';
+      const tw = ctx.measureText(txt).width + 16;
+      const bx = Math.max(4, Math.min(W - tw - 4, h.pr.x - tw / 2)), by = Math.max(4, h.y - 36 * f);
+      ctx.fillStyle = '#1d2430'; ctx.fillRect(bx, by, tw, 24 * f);
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(txt, bx + 8, by + 12 * f); ctx.textAlign = 'center';
+    }
+  }
+
+  // titles and legend
+  ctx.textAlign = 'left'; ctx.fillStyle = '#1d2430'; ctx.font = '700 ' + 15 * f + 'px system-ui, sans-serif';
+  ctx.fillText('Top × Sides × Back', 16, 22 * f);
+  ctx.font = (12 * f) + 'px system-ui, sans-serif'; ctx.fillStyle = '#68707d';
+  ctx.fillText('1 buzzed · 2 short · 3 medium · 4 long · 5 very long', 16, 42 * f);
+  let lx = 16;
+  ctx.font = (12 * f) + 'px system-ui, sans-serif';
+  Object.keys(FAM).forEach((k) => {
+    ctx.fillStyle = col(k); ctx.fillRect(lx, 59 * f, 11 * f, 11 * f);
+    ctx.fillStyle = '#1d2430'; ctx.fillText(FAM[k].n, lx + 17 * f, 65 * f);
+    lx += 17 * f + ctx.measureText(FAM[k].n).width + 22 * f;
+  });
+  if (interactive && CS.mode === 'walk') {
+    ctx.fillStyle = '#1d2430'; ctx.font = '600 ' + 12 * f + 'px system-ui, sans-serif';
+    ctx.fillText('Walk mode · you are at Top ' + (CS.cam[0] + 3).toFixed(1) + ' · Sides ' + (CS.cam[1] + 3).toFixed(1) + ' · Back ' + (CS.cam[2] + 3).toFixed(1), 16, H - 34 * f);
+    ctx.fillStyle = '#68707d'; ctx.font = (12 * f) + 'px system-ui, sans-serif';
+    ctx.fillText('W A S D move · Q / E down / up · Shift faster · drag to look · scroll to move forward or back', 16, H - 16 * f);
+  }
+}
+
+function cubePaint() {
+  const cv = cubeEl, w = cv.clientWidth, dpr = window.devicePixelRatio || 1;
+  const sig = w + 'x' + CS.h + '@' + dpr;
+  if (sig !== cubeSize) { cv.width = Math.round(w * dpr); cv.height = Math.round(CS.h * dpr); cv.style.height = CS.h + 'px'; cubeSize = sig; }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawCube(ctx, w, CS.h, true);
+}
+
+const cubeKeys = new Set();
+let cubeT = 0;
+const CUBE_KEYS = ['w', 'a', 's', 'd', 'q', 'e', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '];
+addEventListener('keydown', (e) => {
+  if (view !== 'cube' || CS.mode !== 'walk' || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  const k = e.key.toLowerCase();
+  if (CUBE_KEYS.includes(k)) { cubeKeys.add(k); e.preventDefault(); }
+});
+addEventListener('keyup', (e) => cubeKeys.delete(e.key.toLowerCase()));
+addEventListener('blur', () => cubeKeys.clear());
+
+function cubeForward() {
+  const cy = Math.cos(CS.wyaw), sy = Math.sin(CS.wyaw), cp = Math.cos(CS.wpitch), sp = Math.sin(CS.wpitch);
+  return {F: [sy * cp, sp, -cy * cp], R: [cy, 0, sy]};
+}
+function cubeMove(f, r, up) {
+  const {F, R} = cubeForward();
+  for (let i = 0; i < 3; i++) CS.cam[i] = Math.max(-7, Math.min(7, CS.cam[i] + F[i] * f + R[i] * r + (i === 1 ? up : 0)));
+  cubeDirty = true;
+}
+function cubeStep(now) {
+  const dt = Math.min(0.05, (now - cubeT) / 1000 || 0); cubeT = now;
+  if (CS.mode !== 'walk' || !cubeKeys.size) return;
+  const sp = 2.2 * (cubeKeys.has('shift') ? 3 : 1) * dt, has = (...k) => k.some((x) => cubeKeys.has(x));
+  cubeMove(sp * (has('w', 'arrowup') - has('s', 'arrowdown')), sp * (has('d') - has('a')), sp * (has('e', ' ') - has('q')));
+  if (has('arrowleft')) CS.wyaw -= 1.6 * dt;
+  if (has('arrowright')) CS.wyaw += 1.6 * dt;
+  cubeDirty = true;
+}
+
+function cubeEnterWalk(centre) {
+  if (centre) { CS.cam = [0, 0, 0]; CS.wyaw = -0.785; CS.wpitch = -0.615; }
+  else {
+    const D = 6, cp = Math.cos(CS.pitch), sp = Math.sin(CS.pitch), cy = Math.cos(CS.yaw), sy = Math.sin(CS.yaw);
+    CS.cam = [-D * cp * sy, D * sp, D * cp * cy]; CS.wyaw = CS.yaw; CS.wpitch = -CS.pitch;
+  }
+  CS.mode = 'walk'; CS.auto = false; cubeSave(); cubeView($('#app'));
+}
+
+function cubeLoop(now) {
+  cubeStep(now);
+  if (view !== 'cube' || !cubeEl || !document.body.contains(cubeEl)) { cubeRAF = 0; return; }
+  if (CS.auto) { CS.yaw += 0.006; cubeDirty = true; }
+  if (cubeDirty) { cubeDirty = false; cubePaint(); }
+  cubeRAF = requestAnimationFrame(cubeLoop);
+}
+
+async function exportCube() {
+  const rated = items.filter(done);
+  if (!rated.length) return alert('Rate some images first.');
+  rated.forEach(cubeImg);
+  await Promise.all(rated.map((it) => it._p));
+  const W = cubeEl.clientWidth, H = CS.h, sc = 2;
+  const cv = document.createElement('canvas'); cv.width = W * sc; cv.height = H * sc;
+  const ctx = cv.getContext('2d'); ctx.scale(sc, sc);
+  drawCube(ctx, W, H, false);
+  cv.toBlob((b) => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'hair-3d-map.png'; a.click(); }, 'image/png');
+}
+
+function cubeView(app) {
+  const sl = (id, label, min, max, step, unit) => '<label>' + label + '<input type="range" id="c_' + id + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + CS[id] + '"><output>' + CS[id] + unit + '</output></label>';
+  const ck = (id, label) => '<label><input type="checkbox" id="c_' + id + '"' + (CS[id] ? ' checked' : '') + '> ' + label + '</label>';
+  const unrated = items.length - items.filter(done).length;
+  app.innerHTML = '<p class="table-intro">All 125 combinations of Top, Sides and Back (1 to 5 each). The origin is 1-1-1; each axis runs up to 5. Drag to rotate, scroll to zoom, click an image to edit its ratings.</p>' +
+    legend() +
+    '<div class="tools">' + sl('size', 'Image size', 20, 140, 2, '') + sl('spread', 'Spread in cell', 0, 250, 10, '%') + sl('persp', 'Perspective', 0, 100, 5, '') + sl('zoom', 'Zoom', 40, 300, 5, '%') + sl('h', 'Height', 400, 1000, 20, '') +
+    '<label>Mode <select id="c_mode"><option value="orbit">Orbit (outside)</option><option value="walk">Walk (inside)</option></select></label><button id="c_centre">Walk from centre</button>' +
+    '<label>View <select id="c_view"><option value="">Choose…</option><option value="iso">Isometric</option><option value="front">Front: Top × Sides</option><option value="side">Side: Back × Sides</option><option value="floor">Floor: Top × Back</option></select></label>' +
+    ck('lattice', 'Lattice points') + ck('codes', 'Codes') + ck('auto', 'Auto-rotate') +
+    '<button id="c_rst">Reset</button><span class="sp"></span><button id="c_exp">Export 3D map (PNG)</button></div>' +
+    '<canvas id="cube"></canvas><p class="hint" id="c_hint"></p>' +
+    (unrated ? '<p class="hint">' + unrated + ' unrated image' + (unrated === 1 ? '' : 's') + ' not shown yet.</p>' : '');
+  cubeEl = $('#cube'); cubeSize = ''; cubeDirty = true; cubeT = performance.now();
+  $('#c_mode').value = CS.mode;
+  $('#c_hint').textContent = CS.mode === 'walk'
+    ? 'Walk mode: W A S D move, Q / E go down / up, Shift moves faster, arrow keys also work, drag to look around, scroll to move forward or back. Switching to Walk locks the current view as your starting point.'
+    : 'Tip: switch Mode to Walk (inside) to lock this view and move through the space.';
+  $('#c_mode').onchange = (e) => { if (e.target.value === 'walk') cubeEnterWalk(false); else { CS.mode = 'orbit'; cubeSave(); cubeView($('#app')); } };
+  $('#c_centre').onclick = () => cubeEnterWalk(true);
+  const units = {size: '', spread: '%', persp: '', zoom: '%', h: ''};
+  Object.keys(units).forEach((id) => {
+    const inp = $('#c_' + id);
+    inp.oninput = () => { CS[id] = +inp.value; inp.nextElementSibling.textContent = inp.value + units[id]; cubeSave(); cubeDirty = true; };
+  });
+  ['lattice', 'codes', 'auto'].forEach((id) => { $('#c_' + id).onchange = (e) => { CS[id] = e.target.checked; cubeSave(); cubeDirty = true; }; });
+  $('#c_view').onchange = (e) => {
+    const v = {iso: [0.6, 0.4], front: [0, 0], side: [Math.PI / 2, 0], floor: [0, Math.PI / 2]}[e.target.value];
+    if (v) { CS.yaw = v[0]; CS.pitch = v[1]; CS.auto = false; CS.mode = 'orbit'; cubeSave(); cubeView($('#app')); }
+  };
+  $('#c_rst').onclick = () => { CS = Object.assign({}, CS_DEFAULT, {cam: [0, 0, 6]}); cubeSave(); cubeView($('#app')); };
+  $('#c_exp').onclick = exportCube;
+
+  let drag = null, moved = false;
+  const hit = (x, y) => { for (let i = cubeHits.length - 1; i >= 0; i--) { const h = cubeHits[i]; if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h.it; } return null; };
+  cubeEl.onpointerdown = (e) => { drag = {x: e.clientX, y: e.clientY}; moved = false; cubeEl.setPointerCapture(e.pointerId); cubeEl.classList.add('drag'); };
+  cubeEl.onpointermove = (e) => {
+    if (drag) {
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+      if (moved) {
+        if (CS.mode === 'walk') { CS.wyaw += dx * 0.005; CS.wpitch = Math.max(-1.5, Math.min(1.5, CS.wpitch - dy * 0.005)); }
+        else { CS.yaw += dx * 0.01; CS.pitch = Math.max(-1.5708, Math.min(1.5708, CS.pitch + dy * 0.01)); }
+        drag = {x: e.clientX, y: e.clientY}; cubeDirty = true;
+      }
+    } else {
+      const h = hit(e.offsetX, e.offsetY);
+      if (h !== cubeHover) { cubeHover = h; cubeEl.style.cursor = h ? 'pointer' : ''; cubeDirty = true; }
+    }
+  };
+  cubeEl.onpointerup = (e) => {
+    const was = moved; drag = null; cubeEl.classList.remove('drag'); cubeSave();
+    if (!was) { const h = hit(e.offsetX, e.offsetY); if (h) { cur = items.indexOf(h); reg = 0; view = 'rate'; render(); } }
+  };
+  cubeEl.onpointerleave = () => { if (cubeHover) { cubeHover = null; cubeDirty = true; } };
+  cubeEl.onwheel = (e) => {
+    e.preventDefault();
+    if (CS.mode === 'walk') { cubeMove(-e.deltaY * 0.004, 0, 0); return; }
+    CS.zoom = Math.max(40, Math.min(300, Math.round(CS.zoom * Math.exp(-e.deltaY * 0.001))));
+    const z = $('#c_zoom'); z.value = CS.zoom; z.nextElementSibling.textContent = CS.zoom + '%';
+    cubeSave(); cubeDirty = true;
+  };
+  if (cubeRAF) cancelAnimationFrame(cubeRAF);
+  cubeRAF = requestAnimationFrame(cubeLoop);
+}
+addEventListener('resize', () => { cubeDirty = true; });
+
 addEventListener('resize', () => { if (view === 'map') render(); });
 render();
 // first-run buttons
