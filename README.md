@@ -1,4 +1,4 @@
-Basically I wanted something to help me work out how long I would want my hair as I grow it out from a Buzz.
+Basically I wanted something to help me work out how long I would want my hair and the different styles I could try as I grow it out from a Buzz.
 
 Open the HTML in your browser, preferably on a desktop
 upload a collection of photos of hair at different lengths
