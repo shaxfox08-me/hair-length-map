@@ -56,6 +56,7 @@ main{padding:18px;max-width:1300px;margin:0 auto}
 .table-options{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:10px;font-size:13px}
 .table-options label{display:flex;align-items:center;gap:7px}
 .table-options select,.table-options input{font:inherit;padding:5px;border:1px solid var(--line);border-radius:6px;background:white;color:var(--ink)}
+.table-quality{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 10px;padding:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;font-size:13px}.table-quality label{display:flex;align-items:center;gap:7px}.table-quality input[type="range"]{width:150px}.table-quality output{min-width:38px;color:var(--mute)}
 .table-options .sp{flex:1}
 .table-options button{white-space:nowrap}
 .table-cell-more{display:block;margin-top:8px;font-size:12px}
@@ -254,6 +255,8 @@ function tableRow(r) {
 
 let tableSortDirection = 'asc';
 let tableCollapsed = true;
+let tableJpgQuality = 90;
+let tablePngScale = 1.5;
 const TABLE_MAX_VISIBLE_ROWS = 4;
 
 function tableRow(r) {
@@ -320,10 +323,14 @@ function tableView(app) {
     '<div class="table-options">' +
     '<label>Average sort <select id="tableSort"><option value="asc"' + (tableSortDirection === 'asc' ? ' selected' : '') + '>Ascending (lowest first)</option><option value="desc"' + (tableSortDirection === 'desc' ? ' selected' : '') + '>Descending (highest first)</option></select></label>' +
     '<label><input type="checkbox" id="tableCollapse"' + (tableCollapsed ? ' checked' : '') + '> Collapse large cells to 4 images</label>' +
-    '<span class="sp"></span><button id="exportTableCsv">Export table (CSV)</button><button id="exportTableHtml">Export table (HTML)</button></div>' +
+    '<span class="sp"></span><button id="exportTableCsv">Export table (CSV)</button><button id="exportTableHtml">Export table (HTML)</button><button id="exportTablePng">Export table (PNG)</button><button id="exportTableJpg">Export table (JPG)</button></div>' +
+    '<div class="table-quality"><strong>Image export quality</strong>' +
+    '<label>JPG quality <input id="tableJpgQuality" type="range" min="30" max="100" step="5" value="' + tableJpgQuality + '"><output id="tableJpgQualityValue">' + tableJpgQuality + '%</output></label>' +
+    '<label>PNG scale <select id="tablePngScale"><option value="1"' + (tablePngScale === 1 ? ' selected' : '') + '>1× · smaller file</option><option value="1.5"' + (tablePngScale === 1.5 ? ' selected' : '') + '>1.5× · balanced</option><option value="2"' + (tablePngScale === 2 ? ' selected' : '') + '>2× · sharper</option></select></label>' +
+    '<span class="table-export-note">JPG quality controls compression; PNG scale controls pixel resolution.</span></div>' +
     '<div class="table-wrap"><table class="hair-table"><thead><tr><th scope="col">Style group</th>' +
     headings + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
-    '<p class="table-export-note">CSV exports the complete table data (not just the visible thumbnails). HTML exports a standalone table report with the thumbnails embedded, suitable for keeping or sharing.</p>' +
+    '<p class="table-export-note">CSV exports the complete table data. HTML exports a standalone report with embedded thumbnails. PNG and JPG export the full table as a single image, including every rated hairstyle regardless of cell collapse settings.</p>' +
     (unrated ? '<p class="hint">' + unrated + ' unrated image' + (unrated === 1 ? '' : 's') + ' not shown yet. Rate all three sections to place an image in the table.</p>' : '') +
     (!rated.length ? '<p class="hint">Rate at least one image to populate the table.</p>' : '');
 
@@ -338,8 +345,15 @@ function tableView(app) {
     const collapsed = cell.classList.toggle('table-collapsed');
     btn.textContent = collapsed ? 'Show all (' + cell.querySelectorAll('.hair-item').length + ')' : 'Show first 4';
   });
+  $('#tableJpgQuality').oninput = (e) => {
+    tableJpgQuality = +e.target.value;
+    $('#tableJpgQualityValue').textContent = tableJpgQuality + '%';
+  };
+  $('#tablePngScale').onchange = (e) => { tablePngScale = +e.target.value; };
   $('#exportTableCsv').onclick = exportTableCSV;
   $('#exportTableHtml').onclick = exportTableHTML;
+  $('#exportTablePng').onclick = () => exportTableImage('png');
+  $('#exportTableJpg').onclick = () => exportTableImage('jpeg');
 }
 
 function tableData() {
@@ -386,6 +400,166 @@ function exportTableCSV() {
     d.file, d.row, d.longestRating, d.longestLabel, d.top, d.sides, d.back, d.averageDisplay
   ].map(csvEscape).join(',')));
   download('hair-length-table.csv', '\ufeff' + lines.join('\r\n'));
+}
+
+
+async function exportTableImage(format) {
+  const {rows, data} = tableData();
+  if (!data.length) return alert('Rate some images first.');
+  const byCell = {};
+  rows.forEach(r => byCell[r.id] = {});
+  data.forEach(d => {
+    const rowId = tableRow(d.item.r);
+    (byCell[rowId][d.longestRating] ||= []).push(d);
+  });
+
+  // Draw the complete table, independent of the current on-screen collapse state.
+  const exportScale = format === 'png' ? tablePngScale : 1;
+  const baseWidth = 1740;
+  const labelW = 260;
+  const width = Math.round(baseWidth * exportScale);
+  const colW = (baseWidth - labelW) / 5;
+  const pad = 12;
+  const thumb = 72;
+  const captionH = 32;
+  const itemW = 86;
+  const perLine = Math.max(1, Math.floor((colW - pad * 2) / itemW));
+  const headerH = 70;
+  const rowHeights = rows.map(r => {
+    let lines = 1;
+    LEVELS.forEach((_, i) => {
+      const count = (byCell[r.id][i + 1] || []).length;
+      lines = Math.max(lines, Math.ceil(count / perLine));
+    });
+    return Math.max(95, 22 + lines * (thumb + captionH + 8));
+  });
+  const baseHeight = headerH + rowHeights.reduce((a, b) => a + b, 0);
+  const totalHeight = Math.round(baseHeight * exportScale);
+  if (width > 16000 || totalHeight > 16000 || width * totalHeight > 100000000) {
+    return alert('This table is too large for a single image at this quality setting. Try a lower PNG scale or use the HTML/CSV export.');
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = totalHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return alert('Could not create the export image in this browser.');
+  ctx.scale(exportScale, exportScale);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, totalHeight);
+  ctx.fillStyle = '#1d2430';
+  ctx.font = 'bold 22px system-ui, sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Hair length table', pad, 24);
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillStyle = '#68707d';
+  ctx.fillText('Sorted ' + (tableSortDirection === 'asc' ? 'ascending (lowest average first)' : 'descending (highest average first)') +
+    ' · Average = mean of top, sides and back ratings', pad, 49);
+
+  // Header cells.
+  ctx.fillStyle = '#f0f2f5';
+  ctx.fillRect(0, headerH - 1, width, 1);
+  ctx.font = 'bold 14px system-ui, sans-serif';
+  ctx.fillStyle = '#1d2430';
+  ctx.textAlign = 'left';
+  ctx.fillText('Style group', pad, headerH / 2 + 8);
+  LEVELS.forEach((label, i) => {
+    const x = labelW + i * colW;
+    ctx.fillText((i + 1) + ' · ' + label, x + pad, headerH / 2 + 8);
+  });
+
+  // Load images once, tolerating individual failures.
+  const imageMap = new Map();
+  await Promise.all(data.map(async d => {
+    try { imageMap.set(d.file, await loadImg(d.url)); } catch (e) {}
+  }));
+
+  let y = headerH;
+  rows.forEach((row, rowIndex) => {
+    const rowH = rowHeights[rowIndex];
+    ctx.fillStyle = rowIndex % 2 ? '#ffffff' : '#fafbfc';
+    ctx.fillRect(0, y, width, rowH);
+    ctx.strokeStyle = '#d5d9df';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, y + rowH);
+    ctx.lineTo(width, y + rowH);
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#1d2430';
+    ctx.font = 'bold 14px system-ui, sans-serif';
+    ctx.fillText(row.label, pad, y + 12, labelW - pad * 2);
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillStyle = '#68707d';
+    const rowCount = data.filter(d => tableRow(d.item.r) === row.id).length;
+    ctx.fillText(rowCount + ' image' + (rowCount === 1 ? '' : 's'), pad, y + 34);
+
+    LEVELS.forEach((_, colIndex) => {
+      const x = labelW + colIndex * colW;
+      ctx.strokeStyle = '#d5d9df';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + rowH);
+      ctx.stroke();
+      const list = byCell[row.id][colIndex + 1] || [];
+      if (!list.length) {
+        ctx.fillStyle = '#a0a6af';
+        ctx.font = '12px system-ui, sans-serif';
+        ctx.fillText('—', x + pad, y + 14);
+        return;
+      }
+      list.forEach((d, index) => {
+        const line = Math.floor(index / perLine);
+        const slot = index % perLine;
+        const ix = x + pad + slot * itemW;
+        const iy = y + 10 + line * (thumb + captionH + 8);
+        const im = imageMap.get(d.file);
+        if (im) {
+          const scale = Math.min(thumb / im.naturalWidth, thumb / im.naturalHeight);
+          const iw = im.naturalWidth * scale;
+          const ih = im.naturalHeight * scale;
+          ctx.fillStyle = '#f0f1f3';
+          ctx.fillRect(ix, iy, thumb, thumb);
+          ctx.drawImage(im, ix + (thumb - iw) / 2, iy + (thumb - ih) / 2, iw, ih);
+        }
+        ctx.fillStyle = '#68707d';
+        ctx.font = '11px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText('Avg ' + d.averageDisplay, ix + thumb / 2, iy + thumb + 3);
+        ctx.fillText(d.top + '/' + d.sides + '/' + d.back, ix + thumb / 2, iy + thumb + 16);
+        ctx.textAlign = 'left';
+      });
+    });
+    y += rowH;
+  });
+  // Vertical table borders.
+  ctx.strokeStyle = '#d5d9df';
+  ctx.beginPath();
+  ctx.moveTo(0, headerH);
+  ctx.lineTo(0, totalHeight);
+  ctx.moveTo(labelW, headerH);
+  ctx.lineTo(labelW, totalHeight);
+  for (let i = 1; i <= 5; i++) {
+    const x = labelW + i * colW;
+    ctx.moveTo(x, headerH);
+    ctx.lineTo(x, totalHeight);
+  }
+  ctx.stroke();
+
+  const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+  const ext = format === 'png' ? 'png' : 'jpg';
+  canvas.toBlob(blob => {
+    if (!blob) return alert('The browser could not create this image. Try the PNG export or HTML export instead.');
+    const a = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = 'hair-length-table.' + ext;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }, mime, format === 'png' ? undefined : tableJpgQuality / 100);
 }
 
 async function exportTableHTML() {
