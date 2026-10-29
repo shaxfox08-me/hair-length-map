@@ -37,6 +37,8 @@ main{padding:18px;max-width:1300px;margin:0 auto}
 .nav button{flex:1}
 .chip{display:inline-block;padding:3px 10px;border-radius:99px;color:#fff;font-size:13px}
 .hint{font-size:12px;color:var(--mute);margin-top:12px}
+.chk{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;cursor:pointer}
+.nav button:disabled{opacity:.4;cursor:not-allowed}
 /* map */
 #mapscroll{overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px}
 #map{position:relative;flex:none}
@@ -120,6 +122,8 @@ const FAM = {
   hybrid:   {n: 'Long top and back, short sides',  d: 'Sides are short while top and back both carry length.',       slug: 'long-top-and-back-short-sides', c: 'var(--hybrid)'}
 };
 let items = [], cur = 0, reg = 0, view = 'rate';
+let hideRated = false;
+try { hideRated = localStorage.getItem('hairmap:hideRated') === '1'; } catch (e) {}
 const $ = (s) => document.querySelector(s);
 const key = (f) => 'hairmap:' + f.name + ':' + f.size;
 const done = (it) => it.r && it.r.every(Boolean);
@@ -154,10 +158,15 @@ function setVal(v) {
   it.r = it.r || [null, null, null];
   it.r[reg] = v; save(it);
   if (reg < 2) reg++;
-  else if (done(it)) { if (cur < items.length - 1) cur++; reg = 0; }
+  else if (done(it)) { const n = nextIdx(cur, 1); if (n >= 0) cur = n; reg = 0; }
   render();
 }
-function go(d) { cur = Math.max(0, Math.min(items.length - 1, cur + d)); reg = 0; render(); }
+// Next image in direction d. With "Hide already rated" on, rated images are skipped. Returns -1 if there is none.
+function nextIdx(from, d) {
+  for (let i = from + d; i >= 0 && i < items.length; i += d) if (!hideRated || !done(items[i])) return i;
+  return -1;
+}
+function go(d) { const n = nextIdx(cur, d); if (n < 0) return; cur = n; reg = 0; render(); }
 
 function render() {
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === view));
@@ -181,14 +190,28 @@ function rateView(app) {
     [1, 2, 3, 4, 5].map((v) => '<button data-r="' + i + '" data-v="' + v + '" title="' + LEVELS[v - 1] + '" class="' + (r[i] === v ? 'on' : '') + '">' + v + '</button>').join('') +
     '</div></div>').join('');
   const fam = done(it) ? family(r) : null;
+  const left = items.filter((i) => !done(i)).length;
   app.innerHTML = '<div class="rate"><div class="stage"><img src="' + it.url + '" alt=""></div><div class="ctl">' +
-    '<div style="margin-bottom:10px;color:var(--mute)">Image ' + (cur + 1) + ' of ' + items.length + '</div>' + rows +
+    '<div style="margin-bottom:10px;color:var(--mute)">Image ' + (cur + 1) + ' of ' + items.length + (hideRated ? ' · ' + left + ' left to rate' : '') + '</div>' + rows +
     '<div class="scale">1 buzzed, 2 short, 3 medium, 4 long, 5 very long</div>' +
     (fam ? '<span class="chip" style="background:' + FAM[fam].c + '">' + FAM[fam].n + '</span> <span style="color:var(--mute)">' + code(r) + ' (top-sides-back)</span>' : '<span style="color:var(--mute)">Rate all three to place this image.</span>') +
+    '<label class="chk"><input type="checkbox" id="hideRated"' + (hideRated ? ' checked' : '') + '> Hide already rated images</label>' +
+    (hideRated && !left ? '<div class="hint">Every image is rated. Turn the filter off to review them.</div>' : '') +
     '<div class="nav"><button id="prev">Previous</button><button id="next">Next</button></div>' +
     '<div class="hint">Keys: T, S, B choose a region. 1 to 5 set it and move on. Left and right arrows change image.</div></div></div>';
   app.querySelectorAll('.opts button').forEach((b) => b.onclick = () => { reg = +b.dataset.r; setVal(+b.dataset.v); });
   $('#prev').onclick = () => go(-1); $('#next').onclick = () => go(1);
+  $('#prev').disabled = nextIdx(cur, -1) < 0; $('#next').disabled = nextIdx(cur, 1) < 0;
+  $('#hideRated').onchange = (e) => {
+    hideRated = e.target.checked;
+    try { localStorage.setItem('hairmap:hideRated', hideRated ? '1' : '0'); } catch (err) {}
+    // if the current image is already rated, jump to the nearest unrated one
+    if (hideRated && done(items[cur])) {
+      let n = nextIdx(cur, 1); if (n < 0) n = nextIdx(cur, -1);
+      if (n >= 0) { cur = n; reg = 0; }
+    }
+    render();
+  };
 }
 
 function legend() {
